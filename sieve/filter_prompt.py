@@ -219,3 +219,36 @@ def filter_with_claude(
 
     response_text = response.content[0].text
     return parse_filter_response(response_text, content)
+
+
+# ─── Convenience: run filter with Google Gemini SDK ──────────────────────────
+
+def filter_with_gemini(
+    content: ExtractedContent,
+    model: str = "gemini-2.5-flash",
+    api_key: Optional[str] = None,
+) -> FilteredContent:
+    """Run the signal filter using the Google Gemini API.
+
+    Uses Gemini 2.5 Flash by default for cost efficiency.
+    For higher precision, pass model="gemini-2.5-pro".
+    """
+    try:
+        from google import genai
+    except ImportError:
+        raise ImportError("pip install google-genai")
+
+    client = genai.Client(api_key=api_key) if api_key else genai.Client()
+
+    response = client.models.generate_content(
+        model=model,
+        contents=build_filter_prompt(content),
+        config=genai.types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=4096,
+            temperature=0.0,
+        ),
+    )
+
+    response_text = response.text
+    return parse_filter_response(response_text, content)

@@ -227,7 +227,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--model", default="claude-haiku-4-5-20251001",
-        help="Claude model to use (default: haiku)",
+        help="LLM model (default: claude-haiku-4-5-20251001). "
+             "Use gemini-2.5-flash or gemini-2.5-pro for Google Gemini.",
     )
     parser.add_argument(
         "--output", default="./sieve_output",

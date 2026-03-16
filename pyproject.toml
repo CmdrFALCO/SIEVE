@@ -17,6 +17,7 @@ sieve = "sieve.cli:main"
 
 [project.optional-dependencies]
 api = ["anthropic>=0.40"]
+gemini = ["google-genai>=1.0"]
 fetch = ["scrapling[fetchers]"]
 mcp = ["mcp>=1.0"]
-all = ["anthropic>=0.40", "scrapling[fetchers]", "mcp>=1.0"]
+all = ["anthropic>=0.40", "google-genai>=1.0", "scrapling[fetchers]", "mcp>=1.0"]

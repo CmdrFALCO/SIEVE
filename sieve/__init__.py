@@ -12,7 +12,7 @@ from sieve.models import (
     SourceConfig,
 )
 from sieve.extractor import extract_from_text, extract_from_html
-from sieve.filter_prompt import SYSTEM_PROMPT, filter_with_claude
+from sieve.filter_prompt import SYSTEM_PROMPT, filter_with_claude, filter_with_gemini
 from sieve.fetcher import fetch_url, fetch_batch
 from sieve.dedup import content_fingerprint, jaccard_similarity, DeduplicationStore
 from sieve.athena_adapter import AthenaExporter, AthenaNode, AthenaEdge
@@ -30,6 +30,7 @@ __all__ = [
     "extract_from_html",
     "SYSTEM_PROMPT",
     "filter_with_claude",
+    "filter_with_gemini",
     "fetch_url",
     "fetch_batch",
     "content_fingerprint",

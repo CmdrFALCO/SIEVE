@@ -18,7 +18,7 @@ from .models import (
     ExtractedContent, FilteredContent, ContentType, SignalClass
 )
 from .extractor import extract_content, extract_from_text
-from .filter_prompt import filter_with_claude, SYSTEM_PROMPT, build_filter_prompt
+from .filter_prompt import filter_with_claude, filter_with_gemini, SYSTEM_PROMPT, build_filter_prompt
 from .dedup import DeduplicationStore
 from .athena_adapter import AthenaExporter
 
@@ -117,11 +117,18 @@ class SievePipeline:
                 return None
 
         try:
-            result = filter_with_claude(
-                content=extracted,
-                model=self.model,
-                api_key=self.api_key,
-            )
+            if self.model.startswith("gemini"):
+                result = filter_with_gemini(
+                    content=extracted,
+                    model=self.model,
+                    api_key=self.api_key,
+                )
+            else:
+                result = filter_with_claude(
+                    content=extracted,
+                    model=self.model,
+                    api_key=self.api_key,
+                )
         except Exception as e:
             print(f"[SIEVE] Filter failed: {e}")
             return None
