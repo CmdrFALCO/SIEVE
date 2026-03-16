@@ -6,7 +6,7 @@ SIEVE is a content filtering pipeline that separates signal from noise in techni
 
 **Version:** 0.1.0
 **Python:** 3.10+
-**Status:** Full pipeline operational — URL fetching, dedup, CLI, text-in and URL-in paths working.
+**Status:** Full pipeline operational — URL fetching, dedup, CLI, ATHENA export, text-in and URL-in paths working.
 
 ## Project Structure
 
@@ -25,7 +25,7 @@ sieve/
 │   ├── fetcher.py             # URL fetching (httpx baseline, scrapling optional)
 │   ├── dedup.py               # MinHash fingerprinting / near-duplicate detection
 │   ├── cli.py                 # argparse CLI (text, file, url, batch, extract, prompt)
-│   ├── athena_adapter.py      # [planned] FilteredContent → ATHENA graph nodes
+│   ├── athena_adapter.py      # FilteredContent → ATHENA graph nodes/edges/export
 │   ├── mcp_server.py          # [planned] MCP server wrapper
 │   └── spider.py              # [future] Scrapling-based crawler
 │
@@ -35,6 +35,8 @@ sieve/
 │   ├── test_pipeline.py       # 15 tests — extractor, pipeline, digest, save (+1 live skipped)
 │   ├── test_fetcher.py        # 8 tests — source type detection, fetch failure handling
 │   └── test_dedup.py          # 8 tests — fingerprint, jaccard, dedup store persistence
+│
+├── integration_test.py        # Full pipeline test with 4 realistic articles (no API key needed)
 │
 ├── docs/
 │   └── CODEBASE_MAP.md        # This file
@@ -101,9 +103,9 @@ Main orchestrator and public convenience functions.
 | `SievePipeline.process_text()`| Text-in path: text → ExtractedContent → LLM filter → FilteredContent |
 | `SievePipeline.process_url()`| URL path: fetch → extract → filter |
 | `SievePipeline.process_batch()`| Multi-URL with progress counter |
-| `SievePipeline._filter()`   | Dedup check → LLM → signal indicator + BS count → dedup register. TODO: athena hooks (Prompt 05) |
+| `SievePipeline._filter()`   | Dedup check → LLM → signal indicator + BS count → dedup register → ATHENA ingest |
 | `SievePipeline.generate_digest()` | Markdown digest grouped by signal class (high first), with insights/BS/questions/nodes |
-| `SievePipeline.save_results()` | Saves JSON + markdown digest to output_dir |
+| `SievePipeline.save_results()` | Saves JSON + markdown digest + ATHENA graph JSON to output_dir |
 | `sieve_text()`               | One-liner: filter pasted text                    |
 | `get_filter_prompt_for_text()`| Returns (system_prompt, user_prompt) for manual use in claude.ai |
 
@@ -124,6 +126,19 @@ Content fingerprinting for near-duplicate detection across runs.
 | `content_fingerprint()`| 16-char hex fingerprint from MinHash of 5-word shingles |
 | `jaccard_similarity()` | Shingle-based Jaccard similarity (0.0–1.0)       |
 | `DeduplicationStore`   | Persistent JSON store. Exact fingerprint match first, then Jaccard against last 500 entries |
+
+### sieve/athena_adapter.py
+Converts FilteredContent into ATHENA knowledge graph format.
+
+| Component                    | Description                                      |
+|------------------------------|--------------------------------------------------|
+| `AthenaNode`                 | Dataclass: deterministic hash ID, concept, node_type, provenance, quality weight, claims, connections |
+| `AthenaEdge`                 | Dataclass: source_id, target_id, relation, weight, evidence |
+| `_make_node_id()`            | Deterministic 12-char hex hash from concept + source_url |
+| `_signal_to_quality()`       | Blends signal class base (0.8/0.5/0.2/0.05) with score: base*0.6 + score*0.4 |
+| `filtered_to_athena_nodes()` | Each knowledge_node dict → AthenaNode + source node. Quality propagated from signal |
+| `filtered_to_athena_edges()` | Connects nodes to named connections + all knowledge nodes to source node |
+| `AthenaExporter`             | Accumulator: ingest/ingest_batch, dedup by ID (merge connections, keep higher quality), export_json, export_cypher, stats |
 
 ### sieve/cli.py
 Argparse CLI with 6 subcommands.
@@ -155,7 +170,7 @@ dedup.py            Check MinHash fingerprint → skip if near-duplicate
 filter_prompt.py    ExtractedContent → LLM → FilteredContent
     │
     ▼
-athena_adapter.py   [planned] FilteredContent → AthenaNode/AthenaEdge
+athena_adapter.py   FilteredContent → AthenaNode/AthenaEdge → JSON/Cypher export
     │
     ▼
 pipeline.py         Orchestrates above, saves JSON + markdown digest
@@ -198,7 +213,7 @@ The project is built incrementally via numbered prompts:
 2. **Filter Prompt** — SYSTEM_PROMPT, builder, parser, API wrapper ✅
 3. **Extractor & MVP Pipeline** — trafilatura wrapper, basic pipeline ✅
 4. **URL Fetching & CLI** — httpx/scrapling fetcher, dedup, argparse CLI ✅
-5. **ATHENA Adapter & Integration** — graph nodes, full pipeline test
+5. **ATHENA Adapter & Integration** — graph nodes, full pipeline test ✅
 
 ## Conventions
 

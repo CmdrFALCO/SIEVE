@@ -20,6 +20,7 @@ from .models import (
 from .extractor import extract_content, extract_from_text
 from .filter_prompt import filter_with_claude, SYSTEM_PROMPT, build_filter_prompt
 from .dedup import DeduplicationStore
+from .athena_adapter import AthenaExporter
 
 
 class SievePipeline:
@@ -46,6 +47,9 @@ class SievePipeline:
             self._dedup = DeduplicationStore(
                 str(self.output_dir / ".dedup_store.json")
             )
+
+        # ATHENA graph exporter
+        self.athena = AthenaExporter()
 
     def process_url(
         self,
@@ -144,7 +148,8 @@ class SievePipeline:
                 author=extracted.author,
             )
 
-        # TODO Prompt 05: add athena ingestion here
+        # ATHENA ingestion
+        self.athena.ingest(result)
 
         self.results.append(result)
         return result
@@ -220,8 +225,8 @@ class SievePipeline:
         self,
         results: Optional[list[FilteredContent]] = None,
         prefix: str = "sieve",
-    ) -> tuple[Path, Path]:
-        """Save results as JSON and markdown digest."""
+    ) -> tuple[Path, Path, Path]:
+        """Save results as JSON, markdown digest, and ATHENA graph."""
         items = results or self.results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -241,7 +246,11 @@ class SievePipeline:
             f.write(digest)
         print(f"[SIEVE] Saved digest: {md_path}")
 
-        return json_path, md_path
+        # ATHENA graph
+        athena_path = self.output_dir / f"{prefix}_{timestamp}_athena.json"
+        self.athena.export_json(str(athena_path))
+
+        return json_path, md_path, athena_path
 
 
 # ─── Quick-use functions ─────────────────────────────────────────────────────

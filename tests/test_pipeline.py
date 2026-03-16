@@ -148,11 +148,13 @@ class TestSievePipeline:
             signal_score=0.1,
             summary="Nothing here.",
         )
-        json_path, md_path = pipe.save_results(results=[mock_result], prefix="test")
+        json_path, md_path, athena_path = pipe.save_results(results=[mock_result], prefix="test")
         assert json_path.exists()
         assert md_path.exists()
+        assert athena_path.exists()
         assert json_path.suffix == ".json"
         assert md_path.suffix == ".md"
+        assert athena_path.name.endswith("_athena.json")
 
         import json
         with open(json_path, encoding="utf-8") as f:

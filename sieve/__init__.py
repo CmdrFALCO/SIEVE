@@ -15,6 +15,7 @@ from sieve.extractor import extract_from_text, extract_from_html
 from sieve.filter_prompt import SYSTEM_PROMPT, filter_with_claude
 from sieve.fetcher import fetch_url, fetch_batch
 from sieve.dedup import content_fingerprint, jaccard_similarity, DeduplicationStore
+from sieve.athena_adapter import AthenaExporter, AthenaNode, AthenaEdge
 from sieve.pipeline import SievePipeline, sieve_text, get_filter_prompt_for_text
 
 __all__ = [
@@ -34,6 +35,9 @@ __all__ = [
     "content_fingerprint",
     "jaccard_similarity",
     "DeduplicationStore",
+    "AthenaExporter",
+    "AthenaNode",
+    "AthenaEdge",
     "SievePipeline",
     "sieve_text",
     "get_filter_prompt_for_text",
