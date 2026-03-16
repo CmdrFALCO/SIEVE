@@ -11,6 +11,9 @@ from sieve.models import (
     FilteredContent,
     SourceConfig,
 )
+from sieve.extractor import extract_from_text, extract_from_html
+from sieve.filter_prompt import SYSTEM_PROMPT, filter_with_claude
+from sieve.pipeline import SievePipeline, sieve_text, get_filter_prompt_for_text
 
 __all__ = [
     "SignalClass",
@@ -20,4 +23,11 @@ __all__ = [
     "Claim",
     "FilteredContent",
     "SourceConfig",
+    "extract_from_text",
+    "extract_from_html",
+    "SYSTEM_PROMPT",
+    "filter_with_claude",
+    "SievePipeline",
+    "sieve_text",
+    "get_filter_prompt_for_text",
 ]

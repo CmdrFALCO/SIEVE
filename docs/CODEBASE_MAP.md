@@ -6,7 +6,7 @@ SIEVE is a content filtering pipeline that separates signal from noise in techni
 
 **Version:** 0.1.0
 **Python:** 3.10+
-**Status:** Early build — models and core filter prompt implemented, pipeline not yet wired.
+**Status:** MVP functional — text-in pipeline working (extractor, filter, digest, save).
 
 ## Project Structure
 
@@ -17,12 +17,12 @@ sieve/
 ├── .gitignore
 │
 ├── sieve/                     # Main package
-│   ├── __init__.py            # Exports all models, __version__
+│   ├── __init__.py            # Exports all models + public API, __version__
 │   ├── models.py              # Data models (dataclasses + enums)
 │   ├── filter_prompt.py       # LLM signal filter (SYSTEM_PROMPT, parser, API wrapper)
-│   ├── extractor.py           # [planned] trafilatura HTML → clean text
+│   ├── extractor.py           # trafilatura HTML → clean text + direct text input
+│   ├── pipeline.py            # Orchestrator (SievePipeline, sieve_text, get_filter_prompt_for_text)
 │   ├── fetcher.py             # [planned] URL fetching (httpx, scrapling)
-│   ├── pipeline.py            # [planned] Orchestrator (SievePipeline)
 │   ├── athena_adapter.py      # [planned] FilteredContent → ATHENA graph nodes
 │   ├── dedup.py               # [planned] MinHash fingerprinting / near-duplicate detection
 │   ├── cli.py                 # [planned] argparse CLI
@@ -31,7 +31,8 @@ sieve/
 │
 ├── tests/
 │   ├── test_models.py         # 12 tests — enums, word count, serialization
-│   └── test_filter_prompt.py  # 16 tests — prompt content, parsing, edge cases
+│   ├── test_filter_prompt.py  # 16 tests — prompt content, parsing, edge cases
+│   └── test_pipeline.py       # 15 tests — extractor, pipeline, digest, save (+1 live skipped)
 │
 ├── docs/
 │   └── CODEBASE_MAP.md        # This file
@@ -70,6 +71,15 @@ All data models as dataclasses (no Pydantic).
 | `FilteredContent`  | Full filter output: signal class/score, claims, insights, BS patterns, knowledge nodes. Has `to_dict()` and `to_json()` |
 | `SourceConfig`     | Configuration for a monitored content source     |
 
+### sieve/extractor.py
+Content extraction — two paths:
+
+| Function              | Description                                      |
+|-----------------------|--------------------------------------------------|
+| `extract_content()`   | Full extraction from `RawContent` via trafilatura (comments off, tables on, min 50 chars) |
+| `extract_from_html()` | Convenience: HTML string → `ExtractedContent` (wraps `extract_content`) |
+| `extract_from_text()` | Direct text → `ExtractedContent` for pasted content. Defaults to `LINKEDIN_POST` |
+
 ### sieve/filter_prompt.py
 The core BS detector. Four components:
 
@@ -79,6 +89,19 @@ The core BS detector. Four components:
 | `build_filter_prompt()`  | Builds user message with source metadata + content (truncated to 8000 chars) + JSON output schema |
 | `parse_filter_response()`| 3-step JSON parsing: direct → strip markdown fences → regex `{…}` fallback → `ValueError` |
 | `filter_with_claude()`   | Anthropic SDK wrapper. Default: Haiku for volume. Optional: Sonnet for precision |
+
+### sieve/pipeline.py
+Main orchestrator and public convenience functions.
+
+| Component                    | Description                                      |
+|------------------------------|--------------------------------------------------|
+| `SievePipeline`              | Main class: `process_text()`, `_filter()`, `generate_digest()`, `save_results()` |
+| `SievePipeline.process_text()`| MVP path: text → ExtractedContent → LLM filter → FilteredContent |
+| `SievePipeline._filter()`   | Runs LLM, prints signal indicator + BS count. TODO: dedup + athena hooks (Prompt 05) |
+| `SievePipeline.generate_digest()` | Markdown digest grouped by signal class (high first), with insights/BS/questions/nodes |
+| `SievePipeline.save_results()` | Saves JSON + markdown digest to output_dir |
+| `sieve_text()`               | One-liner: filter pasted text                    |
+| `get_filter_prompt_for_text()`| Returns (system_prompt, user_prompt) for manual use in claude.ai |
 
 ## Data Flow (target architecture)
 
@@ -124,8 +147,9 @@ Install: `pip install -e .` (core) or `pip install -e ".[all]"` (everything).
 ```
 tests/test_models.py          12 tests    Models, enums, serialization
 tests/test_filter_prompt.py   16 tests    Prompt, parser, edge cases
+tests/test_pipeline.py        15 tests    Extractor, pipeline, digest, save (+1 live skipped)
                               ── ──────
-                              28 total
+                              43 total (42 pass, 1 skipped without API key)
 ```
 
 Run: `python -m pytest tests/ -v`
@@ -136,7 +160,7 @@ The project is built incrementally via numbered prompts:
 
 1. **Scaffolding & Models** — project structure, dataclasses, pyproject.toml ✅
 2. **Filter Prompt** — SYSTEM_PROMPT, builder, parser, API wrapper ✅
-3. **Extractor & MVP Pipeline** — trafilatura wrapper, basic pipeline
+3. **Extractor & MVP Pipeline** — trafilatura wrapper, basic pipeline ✅
 4. **URL Fetching & CLI** — httpx/scrapling fetcher, argparse CLI
 5. **ATHENA Adapter & Integration** — graph nodes, dedup, full pipeline test
 
