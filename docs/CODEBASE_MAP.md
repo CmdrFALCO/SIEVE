@@ -6,7 +6,7 @@ SIEVE is a content filtering pipeline that separates signal from noise in techni
 
 **Version:** 0.1.0
 **Python:** 3.10+
-**Status:** MVP functional — text-in pipeline working (extractor, filter, digest, save).
+**Status:** Full pipeline operational — URL fetching, dedup, CLI, text-in and URL-in paths working.
 
 ## Project Structure
 
@@ -22,17 +22,19 @@ sieve/
 │   ├── filter_prompt.py       # LLM signal filter (SYSTEM_PROMPT, parser, API wrapper)
 │   ├── extractor.py           # trafilatura HTML → clean text + direct text input
 │   ├── pipeline.py            # Orchestrator (SievePipeline, sieve_text, get_filter_prompt_for_text)
-│   ├── fetcher.py             # [planned] URL fetching (httpx, scrapling)
+│   ├── fetcher.py             # URL fetching (httpx baseline, scrapling optional)
+│   ├── dedup.py               # MinHash fingerprinting / near-duplicate detection
+│   ├── cli.py                 # argparse CLI (text, file, url, batch, extract, prompt)
 │   ├── athena_adapter.py      # [planned] FilteredContent → ATHENA graph nodes
-│   ├── dedup.py               # [planned] MinHash fingerprinting / near-duplicate detection
-│   ├── cli.py                 # [planned] argparse CLI
 │   ├── mcp_server.py          # [planned] MCP server wrapper
 │   └── spider.py              # [future] Scrapling-based crawler
 │
 ├── tests/
 │   ├── test_models.py         # 12 tests — enums, word count, serialization
 │   ├── test_filter_prompt.py  # 16 tests — prompt content, parsing, edge cases
-│   └── test_pipeline.py       # 15 tests — extractor, pipeline, digest, save (+1 live skipped)
+│   ├── test_pipeline.py       # 15 tests — extractor, pipeline, digest, save (+1 live skipped)
+│   ├── test_fetcher.py        # 8 tests — source type detection, fetch failure handling
+│   └── test_dedup.py          # 8 tests — fingerprint, jaccard, dedup store persistence
 │
 ├── docs/
 │   └── CODEBASE_MAP.md        # This file
@@ -95,21 +97,53 @@ Main orchestrator and public convenience functions.
 
 | Component                    | Description                                      |
 |------------------------------|--------------------------------------------------|
-| `SievePipeline`              | Main class: `process_text()`, `_filter()`, `generate_digest()`, `save_results()` |
-| `SievePipeline.process_text()`| MVP path: text → ExtractedContent → LLM filter → FilteredContent |
-| `SievePipeline._filter()`   | Runs LLM, prints signal indicator + BS count. TODO: dedup + athena hooks (Prompt 05) |
+| `SievePipeline`              | Main class: `process_text()`, `process_url()`, `process_batch()`, `_filter()`, `generate_digest()`, `save_results()` |
+| `SievePipeline.process_text()`| Text-in path: text → ExtractedContent → LLM filter → FilteredContent |
+| `SievePipeline.process_url()`| URL path: fetch → extract → filter |
+| `SievePipeline.process_batch()`| Multi-URL with progress counter |
+| `SievePipeline._filter()`   | Dedup check → LLM → signal indicator + BS count → dedup register. TODO: athena hooks (Prompt 05) |
 | `SievePipeline.generate_digest()` | Markdown digest grouped by signal class (high first), with insights/BS/questions/nodes |
 | `SievePipeline.save_results()` | Saves JSON + markdown digest to output_dir |
 | `sieve_text()`               | One-liner: filter pasted text                    |
 | `get_filter_prompt_for_text()`| Returns (system_prompt, user_prompt) for manual use in claude.ai |
 
-## Data Flow (target architecture)
+### sieve/fetcher.py
+URL fetching with httpx baseline and optional scrapling upgrade.
+
+| Function              | Description                                      |
+|-----------------------|--------------------------------------------------|
+| `fetch_url()`         | Fetch URL → `RawContent`. Auto-selects method by domain (stealthy for LinkedIn). Falls back to httpx if scrapling unavailable |
+| `fetch_batch()`       | Fetch multiple URLs, skip failures               |
+| `_detect_source_type()`| Infer `ContentType` from URL patterns (linkedin.com, medium.com, github.com, arxiv.org) |
+
+### sieve/dedup.py
+Content fingerprinting for near-duplicate detection across runs.
+
+| Component              | Description                                      |
+|------------------------|--------------------------------------------------|
+| `content_fingerprint()`| 16-char hex fingerprint from MinHash of 5-word shingles |
+| `jaccard_similarity()` | Shingle-based Jaccard similarity (0.0–1.0)       |
+| `DeduplicationStore`   | Persistent JSON store. Exact fingerprint match first, then Jaccard against last 500 entries |
+
+### sieve/cli.py
+Argparse CLI with 6 subcommands.
+
+| Subcommand | Description                                      |
+|------------|--------------------------------------------------|
+| `text`     | Filter inline text (`sieve text "..." --author X --source linkedin`) |
+| `file`     | Filter text from file (`sieve file post.txt`)    |
+| `url`      | Fetch + filter URL (`sieve url URL --method auto`) |
+| `batch`    | Batch process URLs from file (`sieve batch urls.txt`) |
+| `extract`  | Extract only, no LLM (`sieve extract URL`)       |
+| `prompt`   | Generate prompt for manual claude.ai use (`sieve prompt "..."`) |
+
+## Data Flow
 
 ```
 URL or raw text
     │
     ▼
-fetcher.py          Fetch HTML (httpx or scrapling)
+fetcher.py          Fetch HTML (httpx baseline, scrapling for stealth)
     │
     ▼
 extractor.py        HTML → ExtractedContent (trafilatura)
@@ -121,13 +155,13 @@ dedup.py            Check MinHash fingerprint → skip if near-duplicate
 filter_prompt.py    ExtractedContent → LLM → FilteredContent
     │
     ▼
-athena_adapter.py   FilteredContent → AthenaNode/AthenaEdge
+athena_adapter.py   [planned] FilteredContent → AthenaNode/AthenaEdge
     │
     ▼
 pipeline.py         Orchestrates above, saves JSON + markdown digest
     │
     ▼
-cli.py              CLI entry point: `sieve <url-or-text>`
+cli.py              CLI entry point: `sieve <subcommand>`
 ```
 
 ## Dependencies
@@ -135,8 +169,8 @@ cli.py              CLI entry point: `sieve <url-or-text>`
 | Dependency     | Group    | Purpose                          |
 |----------------|----------|----------------------------------|
 | trafilatura    | core     | HTML content extraction          |
+| httpx          | core     | HTTP fetching (baseline client)  |
 | anthropic      | api      | LLM signal filtering             |
-| httpx          | simple   | Basic URL fetching               |
 | scrapling      | fetch    | Stealth fetching (anti-bot)      |
 | mcp            | mcp      | MCP server protocol              |
 
@@ -148,8 +182,10 @@ Install: `pip install -e .` (core) or `pip install -e ".[all]"` (everything).
 tests/test_models.py          12 tests    Models, enums, serialization
 tests/test_filter_prompt.py   16 tests    Prompt, parser, edge cases
 tests/test_pipeline.py        15 tests    Extractor, pipeline, digest, save (+1 live skipped)
+tests/test_fetcher.py          8 tests    Source type detection, fetch failure handling
+tests/test_dedup.py            8 tests    Fingerprint, jaccard, dedup store persistence
                               ── ──────
-                              43 total (42 pass, 1 skipped without API key)
+                              62 total (61 pass, 1 skipped without API key)
 ```
 
 Run: `python -m pytest tests/ -v`
@@ -161,8 +197,8 @@ The project is built incrementally via numbered prompts:
 1. **Scaffolding & Models** — project structure, dataclasses, pyproject.toml ✅
 2. **Filter Prompt** — SYSTEM_PROMPT, builder, parser, API wrapper ✅
 3. **Extractor & MVP Pipeline** — trafilatura wrapper, basic pipeline ✅
-4. **URL Fetching & CLI** — httpx/scrapling fetcher, argparse CLI
-5. **ATHENA Adapter & Integration** — graph nodes, dedup, full pipeline test
+4. **URL Fetching & CLI** — httpx/scrapling fetcher, dedup, argparse CLI ✅
+5. **ATHENA Adapter & Integration** — graph nodes, full pipeline test
 
 ## Conventions
 

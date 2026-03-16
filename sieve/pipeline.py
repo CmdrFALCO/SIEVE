@@ -1,8 +1,8 @@
-"""SIEVE Pipeline — Extract → Filter → Output.
+"""SIEVE Pipeline — Fetch → Extract → Filter → Output.
 
 This is the main orchestrator. It can process:
 - Raw text (e.g. pasted LinkedIn posts) — MVP path
-- A single URL (requires fetcher, Prompt 04)
+- A single URL
 - A batch of URLs
 
 Output goes to ATHENA-compatible JSON and/or a readable markdown digest.
@@ -17,8 +17,9 @@ from typing import Optional
 from .models import (
     ExtractedContent, FilteredContent, ContentType, SignalClass
 )
-from .extractor import extract_from_text
+from .extractor import extract_content, extract_from_text
 from .filter_prompt import filter_with_claude, SYSTEM_PROMPT, build_filter_prompt
+from .dedup import DeduplicationStore
 
 
 class SievePipeline:
@@ -30,6 +31,7 @@ class SievePipeline:
         api_key: Optional[str] = None,
         output_dir: str = "./sieve_output",
         min_signal: SignalClass = SignalClass.MODERATE_SIGNAL,
+        dedup: bool = True,
     ):
         self.model = model
         self.api_key = api_key
@@ -37,6 +39,36 @@ class SievePipeline:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.min_signal = min_signal
         self.results: list[FilteredContent] = []
+
+        # Deduplication
+        self._dedup: Optional[DeduplicationStore] = None
+        if dedup:
+            self._dedup = DeduplicationStore(
+                str(self.output_dir / ".dedup_store.json")
+            )
+
+    def process_url(
+        self,
+        url: str,
+        method: str = "auto",
+        source_type: Optional[ContentType] = None,
+    ) -> Optional[FilteredContent]:
+        """Full pipeline: fetch → extract → filter."""
+        from .fetcher import fetch_url
+
+        print(f"[SIEVE] Fetching: {url}")
+        raw = fetch_url(url, method=method, source_type=source_type)
+        if not raw:
+            print(f"[SIEVE] Fetch failed: {url}")
+            return None
+
+        print("[SIEVE] Extracting content...")
+        extracted = extract_content(raw)
+        if not extracted:
+            print(f"[SIEVE] Extraction failed: {url}")
+            return None
+
+        return self._filter(extracted)
 
     def process_text(
         self,
@@ -54,12 +86,31 @@ class SievePipeline:
         )
         return self._filter(extracted)
 
+    def process_batch(
+        self,
+        urls: list[str],
+        method: str = "auto",
+    ) -> list[FilteredContent]:
+        """Process multiple URLs."""
+        results = []
+        for i, url in enumerate(urls):
+            print(f"\n[SIEVE] ({i+1}/{len(urls)}) Processing: {url}")
+            result = self.process_url(url, method=method)
+            if result:
+                results.append(result)
+        return results
+
     def _filter(self, extracted: ExtractedContent) -> Optional[FilteredContent]:
         """Run the LLM signal filter."""
         print(f"[SIEVE] Filtering: {extracted.title or extracted.url}")
         print(f"         ({extracted.word_count} words, {extracted.source_type.value})")
 
-        # TODO Prompt 05: add dedup check here (before LLM call to save cost)
+        # Dedup check before LLM call to save cost
+        if self._dedup:
+            dup = self._dedup.is_duplicate(extracted.text)
+            if dup:
+                print(f"         ⏭ Duplicate of: {dup.get('title', dup.get('url', 'unknown'))}")
+                return None
 
         try:
             result = filter_with_claude(
@@ -84,7 +135,16 @@ class SievePipeline:
         if result.marketing_patterns:
             print(f"         BS detected: {len(result.marketing_patterns)} patterns")
 
-        # TODO Prompt 05: add dedup registration and athena ingestion here
+        # Register in dedup store
+        if self._dedup:
+            self._dedup.register(
+                text=extracted.text,
+                url=extracted.url,
+                title=extracted.title,
+                author=extracted.author,
+            )
+
+        # TODO Prompt 05: add athena ingestion here
 
         self.results.append(result)
         return result
