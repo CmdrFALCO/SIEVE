@@ -1,0 +1,7 @@
+sieve_output/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.env
